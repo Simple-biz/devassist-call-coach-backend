@@ -3,19 +3,17 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+require("dotenv/config"); // Auto-loads .env — must be the very first import
 const express_1 = __importDefault(require("express"));
 const http_1 = require("http");
 const socket_io_1 = require("socket.io");
 const cors_1 = __importDefault(require("cors"));
-const dotenv_1 = __importDefault(require("dotenv"));
 const logger_1 = require("./utils/logger");
 const ai_analysis_service_1 = require("./services/ai-analysis.service");
 const conversation_service_1 = require("./services/conversation.service");
 const aws_transcribe_service_1 = require("./services/aws-transcribe.service");
 const client_ses_1 = require("@aws-sdk/client-ses");
 const ai_controller_1 = require("./controllers/ai.controller");
-// Load environment variables
-dotenv_1.default.config();
 const serverLogger = (0, logger_1.createLogger)('server');
 // Validate environment
 const requiredEnv = ['OPENAI_API_KEY', 'BACKEND_API_KEY'];
@@ -78,6 +76,72 @@ app.get('/health', (_req, res) => {
         timestamp: Date.now(),
         activeConversations: conversationService.getActiveConversations().length,
     });
+});
+// ============================================================================
+// CALLTOOLS WEBHOOK ENDPOINT
+// ============================================================================
+/**
+ * POST /webhook/calltools
+ *
+ * Receives real-time call events from CallTools webhooks.
+ * Pushes events to connected Chrome extensions via Socket.io.
+ *
+ * CallTools sends this when a call starts, ends, or is dispositioned.
+ * The X-Webhook-Secret header is validated against CALLTOOLS_WEBHOOK_SECRET env var.
+ */
+app.post('/webhook/calltools', (req, res) => {
+    try {
+        // Validate webhook secret
+        const webhookSecret = process.env.CALLTOOLS_WEBHOOK_SECRET;
+        const receivedSecret = req.headers['x-webhook-secret'];
+        if (webhookSecret && receivedSecret !== webhookSecret) {
+            serverLogger.warn('⚠️ [Webhook] Invalid webhook secret');
+            res.status(401).json({ error: 'Invalid webhook secret' });
+            return;
+        }
+        const payload = req.body;
+        serverLogger.info('📞 [Webhook] CallTools event received', {
+            callUuid: payload.uuid || payload.call_uuid,
+            destination: payload.destination,
+            source: payload.source,
+            systemDisposition: payload.system_disposition,
+            hasStart: !!payload.start,
+            hasEnd: !!payload.end,
+        });
+        // Determine call event type from payload
+        let eventType;
+        if (payload.end) {
+            eventType = 'CALL_ENDED';
+        }
+        else if (payload.start && !payload.end) {
+            eventType = 'CALL_STARTED';
+        }
+        else {
+            eventType = 'CALL_UPDATED';
+        }
+        const callEvent = {
+            eventType,
+            callUuid: payload.uuid || payload.call_uuid || null,
+            contactId: payload.contact || null,
+            campaignId: payload.campaign || null,
+            destination: payload.destination || null,
+            source: payload.source || null,
+            callType: payload.inbound ? 'inbound' : 'outbound',
+            startTime: payload.start || null,
+            endTime: payload.end || null,
+            disposition: payload.system_disposition || payload.call_disposition || null,
+            agentId: payload.app_user || null,
+        };
+        serverLogger.info(`📞 [Webhook] Event: ${eventType}`, callEvent);
+        // Broadcast to ALL connected Socket.io clients
+        io.emit('CALLTOOLS_CALL_EVENT', callEvent);
+        serverLogger.info(`📡 [Webhook] Broadcasted ${eventType} to ${io.engine.clientsCount} clients`);
+        res.status(200).json({ received: true, eventType });
+    }
+    catch (error) {
+        serverLogger.error('❌ [Webhook] Error processing CallTools webhook:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
 });
 // ============================================================================
 // EMAIL REPORT ENDPOINT (AWS SES)

@@ -1,8 +1,9 @@
+import 'dotenv/config'; // Auto-loads .env — must be the very first import
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { createLogger } from './utils/logger';
 import { AIAnalysisService } from './services/ai-analysis.service';
 import { ConversationService } from './services/conversation.service';
@@ -22,8 +23,6 @@ import type {
   EndTranscriptionPayload,
 } from './types';
 
-// Load environment variables
-dotenv.config();
 
 const serverLogger = createLogger('server');
 
@@ -94,6 +93,95 @@ app.get('/health', (_req, res) => {
     timestamp: Date.now(),
     activeConversations: conversationService.getActiveConversations().length,
   });
+});
+
+// ============================================================================
+// CALLTOOLS WEBHOOK ENDPOINT
+// ============================================================================
+
+/**
+ * POST /webhook/calltools
+ *
+ * Receives real-time call events from CallTools webhooks.
+ * Pushes events to connected Chrome extensions via Socket.io.
+ *
+ * CallTools sends this when a call starts, ends, or is dispositioned.
+ * The X-Webhook-Secret header is validated against CALLTOOLS_WEBHOOK_SECRET env var.
+ */
+// Track last webhook event to deduplicate rapid-fire calls
+let lastWebhookEventKey = '';
+let lastWebhookTime = 0;
+const WEBHOOK_DEBOUNCE_MS = 2000; // Ignore duplicate events within 2 seconds
+
+app.post('/webhook/calltools', (req, res): void => {
+  try {
+    // Validate webhook secret
+    const webhookSecret = process.env.CALLTOOLS_WEBHOOK_SECRET;
+    const receivedSecret = req.headers['x-webhook-secret'];
+
+    if (webhookSecret && receivedSecret !== webhookSecret) {
+      serverLogger.warn('⚠️ [Webhook] Invalid webhook secret');
+      res.status(401).json({ error: 'Invalid webhook secret' });
+      return;
+    }
+
+    const payload = req.body;
+
+    // Log the RAW payload once to understand CallTools format
+    serverLogger.info('📞 [Webhook] RAW payload keys:', { keys: Object.keys(payload), raw: JSON.stringify(payload).substring(0, 500) });
+
+    // Skip empty/useless payloads
+    const hasUsefulData = payload.uuid || payload.call_uuid || payload.id || payload.start || payload.end || payload.destination;
+    if (!hasUsefulData) {
+      res.status(200).json({ received: true, skipped: true });
+      return;
+    }
+
+    // Deduplicate rapid-fire events
+    const eventKey = `${payload.uuid || payload.call_uuid || payload.id}-${payload.start}-${payload.end}`;
+    const now = Date.now();
+    if (eventKey === lastWebhookEventKey && (now - lastWebhookTime) < WEBHOOK_DEBOUNCE_MS) {
+      res.status(200).json({ received: true, deduplicated: true });
+      return;
+    }
+    lastWebhookEventKey = eventKey;
+    lastWebhookTime = now;
+
+    // Determine call event type from payload
+    let eventType: 'CALL_STARTED' | 'CALL_ENDED' | 'CALL_UPDATED';
+    if (payload.end) {
+      eventType = 'CALL_ENDED';
+    } else if (payload.start && !payload.end) {
+      eventType = 'CALL_STARTED';
+    } else {
+      eventType = 'CALL_UPDATED';
+    }
+
+    const callEvent = {
+      eventType,
+      callUuid: payload.uuid || payload.call_uuid || null,
+      contactId: payload.contact || null,
+      campaignId: payload.campaign || null,
+      destination: payload.destination || null,
+      source: payload.source || null,
+      callType: payload.inbound ? 'inbound' : 'outbound',
+      startTime: payload.start || null,
+      endTime: payload.end || null,
+      disposition: payload.system_disposition || payload.call_disposition || null,
+      agentId: payload.app_user || null,
+    };
+
+    serverLogger.info(`📞 [Webhook] Event: ${eventType}`, callEvent);
+
+    // Broadcast to ALL connected Socket.io clients
+    io.emit('CALLTOOLS_CALL_EVENT', callEvent);
+    serverLogger.info(`📡 [Webhook] Broadcasted ${eventType} to ${io.engine.clientsCount} clients`);
+
+    res.status(200).json({ received: true, eventType });
+  } catch (error: any) {
+    serverLogger.error('❌ [Webhook] Error processing CallTools webhook:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // ============================================================================
