@@ -149,32 +149,32 @@ Return ONLY valid JSON:
       messages: [
         {
           role: 'system',
-          content: `You are Mk1 (or Agent), Bob Hansen's assistant at Simple.Biz.
-YOUR ONLY JOB IS TO SELECT A SCRIPT.
-You are FORBIDDEN from generating original text.
-You MUST select one valid object from the GOLDEN SCRIPTS LIBRARY below.
+          content: `You are a real-time sales coach helping an AGENT during a live call.
+The AGENT is a salesperson. The CALLER is the customer/prospect.
+Your job: suggest what the AGENT should SAY NEXT to the CALLER.
+
+YOU MUST SELECT FROM THE GOLDEN SCRIPTS LIBRARY BELOW. Do not generate original text.
 
 GOLDEN SCRIPTS LIBRARY:
 ${JSON.stringify(QUALITY_SCRIPTS, null, 2)}
 
 INSTRUCTIONS:
-1. Analyze the conversation history and the user's latest input.
-2. Determine the current Conversation Stage (GREETING, VALUE_PROP, OBJECTION_HANDLING, CLOSING, CONVERSION).
-3. Select the SINGLE BEST SCRIPT from the library that matches the context.
-4. FILL PLACEHOLDERS ONLY: [Agent Name] -> "Mark", [Location] -> "Sacramento", [Customer Name] -> Detect or "there".
-5. DO NOT PARAPHRASE. Use the exact "text" field from the library.
+1. Read the conversation history. AGENT = our salesperson, CALLER = customer.
+2. Determine the conversation stage (GREETING, VALUE_PROP, OBJECTION_HANDLING, CLOSING, CONVERSION).
+3. Select TWO different scripts from the library for the AGENT to say next.
+4. Fill placeholders: [Agent Name] -> "Mark", [Location] -> "Sacramento", [Customer Name] -> detected name or "there".
+5. DO NOT PARAPHRASE. Use exact "text" from the library.
 
-CRITICAL OVERRIDE:
-The user's GOAL is to make the customer agree for a callback from Bob.
-Unless the customer is completely rejecting, you MUST prioritize scripts involved with CLOSING or OBJECTION_HANDLING that lead to the "Ask for Call" (id: 'ask-callback') script.
-If the conversation is in a neutral or positive state, suggest 'ask-callback'.
+CRITICAL: The AGENT's goal is to get the CALLER to agree to a callback from Bob.
+Prioritize CLOSING and OBJECTION_HANDLING scripts that lead toward 'ask-callback'.
 
 Return ONLY valid JSON:
 {
   "heading": "2-word max heading (e.g. 'Handle Objection')",
   "stage": "Detected Stage",
-  "context": "Why this specific script was selected based on the last user message",
+  "context": "Why these scripts fit what the CALLER just said",
   "options": [
+    { "label": "Label from library", "script": "EXACT TEXT from library with placeholders filled" },
     { "label": "Label from library", "script": "EXACT TEXT from library with placeholders filled" }
   ]
 }`,
@@ -360,14 +360,19 @@ Customer responded: "${customerReaction.text}"
 ANALYSIS NEEDED: What does this reveal about customer's mindset? Are they interested, skeptical, ready to move forward, or pushing back?`;
     }
 
-    return `You are Mk1, analyzing a sales conversation in real-time. The agent selected a coaching option, and we captured what actually happened next.
+    return `You are coaching a SALES AGENT in real-time during a live call. Your job is to tell the AGENT what to say next.
+
+IMPORTANT: "AGENT" is OUR salesperson. "CALLER" is the customer/prospect being called. You are helping the AGENT — suggest scripts the AGENT should read aloud to the CALLER.
 
 ## Conversation History (Last 10 exchanges)
 ${conversationSummary}
 ${analysisSection}
 
+## What the Agent Selected Last
+The agent chose to say: "${selectedScript}"
+
 ## Your Task
-Based on the ACTUAL conversation flow (not just the suggestion), generate the SINGLE best next recommendation.
+Based on what the CALLER just said, select TWO script options from the Golden Scripts Library that the AGENT should say next. These must be things the AGENT says TO the customer, not what the customer would say.
 `;
   }
 
