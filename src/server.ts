@@ -111,6 +111,19 @@ app.get('/health', (_req, res) => {
  */
 app.post('/api/generate-report', async (req, res) => {
   try {
+    // Authenticate request
+    const apiKey = req.headers['x-api-key'];
+    if (!apiKey) {
+      serverLogger.warn('📧 [Email] Unauthorized - missing API key');
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+    if (apiKey !== process.env.BACKEND_API_KEY) {
+      serverLogger.warn('📧 [Email] Forbidden - invalid API key');
+      res.status(403).json({ success: false, error: 'Forbidden' });
+      return;
+    }
+
     serverLogger.info('📧 [Email] Received email report request');
 
     const { callMetadata, transcripts, aiTips, intelligence, entities } = req.body;
