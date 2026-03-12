@@ -1,8 +1,9 @@
+import 'dotenv/config'; // Must be first — loads .env before any other import reads process.env
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server, Socket } from 'socket.io';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { createLogger } from './utils/logger';
 import { AIAnalysisService } from './services/ai-analysis.service';
 import { ConversationService } from './services/conversation.service';
@@ -21,9 +22,6 @@ import type {
   StartTranscriptionPayload,
   EndTranscriptionPayload,
 } from './types';
-
-// Load environment variables
-dotenv.config();
 
 const serverLogger = createLogger('server');
 
